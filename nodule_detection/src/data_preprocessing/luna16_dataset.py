@@ -17,7 +17,7 @@ class LUNA16Dataset(Dataset):  #inherits PyTorch Dataset class to use DataLoader
             split_file: str,
             split_type: str = 'train',  #train, test or val
             patch_size: Tuple[int, int, int] = (128, 128, 128),
-            num_patches_per_scan: int = 4,
+            num_patches_per_scan: int = 6,
             positive_ratio: float = 0.5,  #target ratio of patches containing nodules
             hu_min: int = -1000,  #min and max hu value for clipping
             hu_max: int = 400,
@@ -189,7 +189,7 @@ class LUNA16Dataset(Dataset):  #inherits PyTorch Dataset class to use DataLoader
         return scan_patch, mask_patch
 
 def create_dataloaders(
-        scan_dirs: List[str], mask_dirs: str, split_file: str, batch_size: int=2, num_workers: int=4, **dataset_kwargs
+        scan_dirs: List[str], mask_dirs: str, split_file: str, batch_size: int=4, num_workers: int=6, **dataset_kwargs
 ) -> Tuple[torch.utils.data.DataLoader, ...]:
     #creates train, test and validation dataloaders
     train_dataset = LUNA16Dataset(scan_dirs=scan_dirs, mask_dirs=mask_dirs, split_file=split_file, split_type='train', augment=True, **dataset_kwargs)
@@ -222,10 +222,10 @@ if __name__ == "__main__":
         scan_dirs=SCAN_DIRS,
         mask_dirs=MASK_DIR,
         split_file=SPLIT_FILE,
-        batch_size=2,
-        num_workers=0,  
-        patch_size=(64, 64, 64),
-        num_patches_per_scan=2,
+        batch_size=4,
+        num_workers=6,
+        patch_size=(128, 128, 128),
+        num_patches_per_scan=4,
         seed=42
     )
 

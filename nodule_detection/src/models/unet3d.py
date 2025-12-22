@@ -140,8 +140,8 @@ class UNet3D(nn.Module):
         self,
         input_channels: int = 1,
         output_channels: int = 1,
-        init_features: int = 32,  #number of feature channels in first encoder layer
-        dropout: float = 0.15,
+        init_features: int = 48,  #number of feature channels in first encoder layer
+        dropout: float = 0.2,
         checkpointing: bool = False
     ):
         super().__init__()
