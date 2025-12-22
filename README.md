@@ -57,8 +57,114 @@ Key functions:
 
 ## 4. Data Preprocessing
 
-> _This section will be completed later._  
-> (Normalization, segmentation, labeling, train/validation split, etc.)
+Data preprocessing pipeline has been implemented with the following components:
+
+### 4.1 Segmentation Mask Creation (`segmentation_masks.py`)
+- Converts nodule annotations (world coordinates + diameter) to binary 3D masks
+- Creates ellipsoid masks accounting for anisotropic voxel spacing
+- Handles overlapping nodules using logical OR operation
+- Processes all 10 LUNA16 subsets
+
+### 4.2 PyTorch Dataset (`luna16_dataset.py`)
+- Custom PyTorch Dataset class for loading CT scans and masks
+- Extracts 3D patches (default: 128×128×128) for training
+- Implements data augmentation: random flips, rotations, intensity shifts
+- Handles class imbalance with configurable positive/negative patch ratio
+- HU value normalization (clipping to [-1000, 400] range)
+
+### 4.3 Train/Test/Val Splits (`train_test_val.py`)
+- Stratified splitting across all subsets (70% train, 20% test, 10% val)
+- Reproducible splits with random seed
+- JSON-based split storage for consistency
+- Metadata tracking for experiment reproducibility
+
+---
+
+## 5. Two-Stage Detection Pipeline
+
+### Stage 1: U-Net Segmentation
+
+**3D U-Net** for volumetric segmentation (22.6M parameters)
+- Input: CT scan patches (128×128×128)
+- Output: Binary segmentation mask
+- Loss: Combined BCE + Dice
+- Metrics: Dice coefficient, Sensitivity, Specificity
+
+**Train U-Net:**
+```bash
+cd nodule_detection/src/models
+python train_unet.py --epochs 50 --batch_size 2
+```
+
+### Stage 2: ResNet False Positive Reduction
+
+**3D ResNet** for candidate classification (3.6M parameters)
+- Input: Candidate patches from U-Net (32×32×32)
+- Output: True nodule vs False positive
+- Extracts connected components from U-Net masks
+- Classifies each candidate using ResNet
+
+**Extract candidates and train ResNet:**
+```bash
+# Extract candidates from trained U-Net
+python train_resnet.py --mode extract --unet_checkpoint checkpoints/unet_best.pth
+
+# Train ResNet on candidates
+python train_resnet.py --mode train --epochs 30
+```
+
+### Pipeline Overview
+```
+CT Scan → U-Net → Segmentation Mask → Extract Candidates → ResNet → Final Detections
+```
+
+For detailed usage, see [`nodule_detection/src/models/README.md`](nodule_detection/src/models/README.md)
+
+---
+
+## 6. Project Structure
+
+```
+Lung_Cancer_Detection/
+├── README.md
+└── nodule_detection/
+    ├── data/
+    │   └── annotations.csv
+    ├── notebooks/
+    │   └── LUNA16_EDA.ipynb
+    └── src/
+        ├── data_preprocessing/
+        │   ├── segmentation_masks.py    # Create binary masks
+        │   ├── luna16_dataset.py         # PyTorch Dataset
+        │   └── train_test_val.py         # Data splitting
+        └── models/
+            ├── unet3d.py                 # U-Net segmentation
+            ├── resnet3d.py               # ResNet classification
+            ├── losses.py                 # Loss functions
+            ├── metrics.py                # Metrics
+            ├── extract_candidates.py     # Extract candidates from U-Net
+            ├── train_unet.py             # Train U-Net
+            ├── train_resnet.py           # Extract & train ResNet
+            └── README.md                 # Usage guide
+```
+
+---
+
+## 7. References
+
+### Papers
+1. Setio et al. (2017). "Validation, comparison, and combination of algorithms for automatic detection of pulmonary nodules in computed tomography images: The LUNA16 challenge"
+2. Çiçek et al. (2016). "3D U-Net: Learning Dense Volumetric Segmentation from Sparse Annotation"
+3. Ronneberger et al. (2015). "U-Net: Convolutional Networks for Biomedical Image Segmentation"
+4. Milletari et al. (2016). "V-Net: Fully Convolutional Neural Networks for Volumetric Medical Image Segmentation"
+
+### Datasets
+- LUNA16: https://luna16.grand-challenge.org/
+
+### Implementation References
+- [wolny/pytorch-3dunet](https://github.com/wolny/pytorch-3dunet)
+- [ellisdg/3DUnetCNN](https://github.com/ellisdg/3DUnetCNN)
+- [fepegar/unet](https://github.com/fepegar/unet)
 
 ---
 

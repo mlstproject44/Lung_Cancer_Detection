@@ -43,7 +43,7 @@ def luna16_splits(
         test_ratio: float=0.2,
         val_ratio: float=0.1,
         random_seed: int=42
-) -> Tuple[Dict, Dict[str, int]]:
+) -> None:
     
     subset_to_uids, uid_to_subset = build_subset_mapping(scan_dirs)  #build mappings (eliminates redundant scanning later)
     splits = {'train': [], 'test': [], 'val': [], 'subset_info': {}}
@@ -69,11 +69,10 @@ def luna16_splits(
         'total_scans': sum(info['total'] for info in splits['subset_info'].values()),
         'num_subsets': len(subset_to_uids)
     }
+    splits['uid_to_subset'] = uid_to_subset  #saves uid to subset mapping
     os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)  #saves splits to json file
     with open(output_path, 'w') as f:
         json.dump(splits, f, indent=2)
-
-    return splits, uid_to_subset
 
 if __name__ == "__main__":
     BASE_DIR = r"C:\Users\emirb\OneDrive\Desktop\coding\Python\DSAI\projects\data\data_preprocessing"
