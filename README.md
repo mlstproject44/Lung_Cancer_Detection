@@ -74,6 +74,12 @@ Training with every extracted patch wouldn't be possible because of **extreme cl
 
 To reduce false positives, we decided to use **ResNet-18** - another powerful Convolutional Neural Network with 18 layers. It is known for efficient use of residual blocks to combat vanishing gradients, which make it great complement to stage 1 U-Net. We trained ResNet, implementing padding for patches taken from edges and augmentation techniques, namely random rotation, random flip and random itensity shift to simulate different scan angles and noise levels. Using **Adam** as optimizer, **0.0001** learning rate,**BCE with logits loss** as loss function (because of class imbalance) we got astonishing results on test set - only **20 false negatives** and more than 20,000 false positives rejected. Around 204 false positives were classified as true nodules, however, certified supervisor would be able to spot the missclassification. Final metrics are: Test AUC: **0.941**, Sensitivity: **90.0%**, Specificity: **98.9%**.
 
+---
+
+## Demo APP
+
+You can find demo app on [this link](https://drive.google.com/drive/folders/1on5i8kU2F7qcIUXiWxasoV9Yc8U3-Q_F?usp=drive_link) and try it yourself.
+
 ## References
 
 ### Papers
