@@ -9,17 +9,17 @@ from pathlib import Path
 from typing import Tuple
 
 def world_to_voxel(world_coords: np.ndarray, origin: np.ndarray, spacing: np.ndarray) -> np.ndarray:
-    #convert world coordinates (mm) to voxel coordinates (indices)
+    """converts world coordinates (mm) to voxel coordinates (indices)"""
     voxel_coords = (world_coords - origin) / spacing
     return np.round(voxel_coords).astype(int)
 
-def create_ellipsoid_mask(  #creates a binary mask with a filled ellipsoid accounting for anisotropic voxel spacing
+def create_ellipsoid_mask(
     shape: Tuple[int, int, int],
     center: Tuple[int, int, int],
     radius_mm: float,
     spacing: np.ndarray
 ) -> np.ndarray:
-    #creates a 3D ellipsoid mask representing a lung nodule
+    """creates a binary mask with a filled ellipsoid accounting for anisotropic voxel spacing, representing lung nodule"""
 
     mask = np.zeros(shape, dtype=np.uint8)  #empty mask
     center_z, center_y, center_x = center  #unpack center coordinates
@@ -58,12 +58,13 @@ def create_ellipsoid_mask(  #creates a binary mask with a filled ellipsoid accou
 
     return mask
 
-def create_masks_for_subset(  #process a single subset and create masks for all scans
+def create_masks_for_subset(
         subset_dir: Path,
         annotations: pd.DataFrame,
         output_dir: Path,
         subset_name: str
 ) -> dict:
+    """processes a single subset and creates masks for all scans"""
 
     # Create subset folder in output directory
     subset_output_dir = output_dir / subset_name
