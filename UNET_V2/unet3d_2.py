@@ -67,9 +67,8 @@ class Down(nn.Module):
         return self.conv(x)
 
 
-# ============================================================
-#  COVARIANCE ATTENTION GATE
-# ============================================================
+
+#COVARIANCE ATTENTION GATE
 class CovarianceAttentionGate(nn.Module):
     """
     Cross-covariance channel attention gate.
@@ -77,11 +76,6 @@ class CovarianceAttentionGate(nn.Module):
     For each skip channel, computes how much it co-varies with the
     decoder's gating signal. Channels that statistically co-vary with
     "what the decoder is currently searching for" get amplified.
-    This is a second-order generalisation of additive attention.
-
-    The bmm producing the (B, Cs, Cg) cross-covariance is done in fp32
-    regardless of AMP, because at decoder4 Cs=Cg=384 and summing 1728
-    spatial positions in fp16 overflows to NaN.
 
     A learnable per-channel importance scalar (C,) in [0,1] is also
     maintained so the training loop can pass it to ChannelAwareFocalLoss.
@@ -93,10 +87,8 @@ class CovarianceAttentionGate(nn.Module):
         self.norm_g = nn.GroupNorm(min(8, gate_channels), gate_channels)
         self.norm_s = nn.GroupNorm(min(8, skip_channels), skip_channels)
 
-        # learnable per-channel importance — initialised at 0 → sigmoid = 0.5
         self.channel_importance_raw = nn.Parameter(torch.zeros(skip_channels))
 
-        # 1×1 conv mixes channels after attention weighting
         self.proj = nn.Conv3d(skip_channels, skip_channels, kernel_size=1, bias=True)
 
     @property
@@ -112,18 +104,12 @@ class CovarianceAttentionGate(nn.Module):
         s = self.norm_s(skip).view(B, Cs, N)
 
         with torch.autocast(device_type=gate.device.type, enabled=False):
-            # SCALE BEFORE BMM: Use math.sqrt(N) to keep the dot product in a sane range
-            # This prevents the 'NaN' during the internal sum of bmm
             scaling_factor = math.sqrt(N)
             s_f = s.float() / scaling_factor
             g_f = g.float() / scaling_factor
 
             cross_cov = torch.bmm(s_f, g_f.transpose(1, 2))  # (B, Cs, Cg)
 
-        # Sigmoid keeps each channel independently in (0, 1), so the max
-        # multiplier at init is 1 * 1.5 = 1.5 — safe under AMP/fp16.
-        # Previously used softmax(...) * Cs which could produce values ~384
-        # at decoder4, causing NaN in fp16.
         relevance = torch.sigmoid(cross_cov.abs().mean(dim=2))  # (B, Cs), each in (0, 1)
 
         relevance = relevance.view(B, Cs, 1, 1, 1).to(skip.dtype)
@@ -132,9 +118,7 @@ class CovarianceAttentionGate(nn.Module):
         return self.proj(skip * (relevance * (1.0 + imp)))
 
 
-# ============================================================
-#  UP BLOCK
-# ============================================================
+#UP BLOCK
 class Up(nn.Module):
     def __init__(
         self,
@@ -165,16 +149,8 @@ class Up(nn.Module):
         return self.conv(x)
 
 
-# ============================================================
-#  3-D U-NET
-# ============================================================
+#3-D U-NET
 class UNet3D(nn.Module):
-    """
-    3-D U-Net with:
-      - Residual DoubleConv blocks
-      - Cross-covariance attention gates on all skip connections
-      - Optional gradient checkpointing
-    """
     def __init__(
         self,
         input_channels: int = 1,
@@ -190,7 +166,7 @@ class UNet3D(nn.Module):
         residual = True
         attention = True
 
-        # ======== ENCODER ========
+        #ENCODER
         self.encoder1 = DoubleConv(input_channels, features, dropout, residual)
         self.encoder2 = Down(features, features * 2, dropout, residual)
         self.encoder3 = Down(features * 2, features * 4, dropout, residual)
@@ -198,7 +174,7 @@ class UNet3D(nn.Module):
 
         self.bottleneck = Down(features * 8, features * 16, dropout, residual)
 
-        # ======== DECODER ========
+        #DECODER
         self.decoder4 = Up(features * 16, features * 8, dropout, residual, attention)
         self.decoder3 = Up(features * 8,  features * 4, dropout, residual, attention)
         self.decoder2 = Up(features * 4,  features * 2, dropout, residual, attention)
@@ -208,7 +184,7 @@ class UNet3D(nn.Module):
 
     def get_all_channel_importances(self) -> list:
         """
-        Returns list of channel_importance tensors from all 4 attention gates.
+        Returns list of channel_importance tensors from 4 attention gates.
         Used by ChannelAwareFocalLoss in the training loop.
         """
         return [

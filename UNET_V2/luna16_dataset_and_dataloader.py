@@ -18,7 +18,7 @@ class LUNA16PatchDataset(Dataset):
     def __init__(
         self,
         patch_dir: str,
-        split_type: str = 'train',  #'train' | 'val' | 'test'
+        split_type: str = 'train', 
         augment: bool = True,
     ):
         self.split_dir = Path(patch_dir) / split_type
@@ -37,7 +37,7 @@ class LUNA16PatchDataset(Dataset):
 
         # Build index sets used by create_patch_dataloaders for weighted sampling
         self.positive_indices = {
-            idx for idx, m in enumerate(self.metadata) if m['has_nodule']  # int 1 == True
+            idx for idx, m in enumerate(self.metadata) if m['has_nodule']  
         }
         self.negative_indices = {
             idx for idx, m in enumerate(self.metadata) if not m['has_nodule']
@@ -56,7 +56,6 @@ class LUNA16PatchDataset(Dataset):
         meta = self.metadata[idx]
         data = np.load(self.split_dir / meta['filename'])
 
-        # float16 → float32 for PyTorch; mask uint8 0/255 → float32 0/1
         scan = data['scan'].astype(np.float32)
         mask = data['mask'].astype(np.float32) / 255.0
 
@@ -75,25 +74,25 @@ class LUNA16PatchDataset(Dataset):
         Augmentations for (96, 96, 96) patches:
           1. Random flips on all 3 axes
           2. Random 90° axial rotation
-          3. Random crop-resize (simulates nodules near sliding-window edges)
+          3. Random crop-resize
         """
-        # 1. Random flips
+        #1. Random flips
         for axis in range(3):
             if np.random.random() > 0.5:
                 scan = np.flip(scan, axis=axis).copy()
                 mask = np.flip(mask, axis=axis).copy()
 
-        # 2. Random 90° axial rotation
+        #2. Random 90° axial rotation
         k = np.random.randint(0, 4)
         if k > 0:
             scan = np.rot90(scan, k=k, axes=(1, 2)).copy()
             mask = np.rot90(mask, k=k, axes=(1, 2)).copy()
 
-        # 3. Random crop + resize (p=0.5)
+        #3.Random crop + resize (p=0.5)
         if np.random.random() > 0.5:
             from scipy.ndimage import zoom
-            d = scan.shape[0]                                    # 96
-            crop_size = np.random.randint(int(d * 0.87), d)     # 84–95
+            d = scan.shape[0]                                  
+            crop_size = np.random.randint(int(d * 0.87), d)     
             if crop_size < d:
                 z0 = np.random.randint(0, d - crop_size + 1)
                 y0 = np.random.randint(0, d - crop_size + 1)
@@ -101,8 +100,8 @@ class LUNA16PatchDataset(Dataset):
                 scan = scan[z0:z0+crop_size, y0:y0+crop_size, x0:x0+crop_size]
                 mask = mask[z0:z0+crop_size, y0:y0+crop_size, x0:x0+crop_size]
                 scale = d / crop_size
-                scan = zoom(scan, scale, order=1)   # linear for intensity
-                mask = zoom(mask, scale, order=0)   # nearest-neighbour for binary mask
+                scan = zoom(scan, scale, order=1)   
+                mask = zoom(mask, scale, order=0)   
 
         return scan, mask
 
@@ -110,7 +109,7 @@ def create_patch_dataloaders(
     patch_dir: str,
     batch_size: int = 8,
     num_workers: int = 4,
-    positive_fraction: float = 0.7,   #desired positive ratio in each training batch
+    positive_fraction: float = 0.7,  
 ) -> tuple:
     """
     Returns (train_loader, val_loader, test_loader).
