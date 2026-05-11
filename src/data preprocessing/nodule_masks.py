@@ -8,18 +8,18 @@ import SimpleITK as sitk
 from pathlib import Path
 from typing import Tuple
 
-def world_to_voxel(world_coords: np.ndarray, origin: np.ndarray, spacing: np.ndarray) -> np.ndarray:
-    """converts world coordinates (mm) to voxel coordinates (indices)"""
-    voxel_coords = (world_coords - origin) / spacing
-    return np.round(voxel_coords).astype(int)
+BASE_DIR = "/home/jovyan/luna16_OG"
+ANNOTATIONS_FILE = "/home/jovyan/annotations.csv"
+OUTPUT_DIR = "/home/jovyan/vol.2/segmentation_masks"
+NUM_SUBSETS = 10
 
-def create_ellipsoid_mask(
+def create_ellipsoid_mask(  #creates a binary mask with a filled ellipsoid accounting for anisotropic voxel spacing
     shape: Tuple[int, int, int],
     center: Tuple[int, int, int],
     radius_mm: float,
     spacing: np.ndarray
 ) -> np.ndarray:
-    """creates a binary mask with a filled ellipsoid accounting for anisotropic voxel spacing, representing lung nodule"""
+    #creates a 3D ellipsoid mask representing a lung nodule
 
     mask = np.zeros(shape, dtype=np.uint8)  #empty mask
     center_z, center_y, center_x = center  #unpack center coordinates
@@ -58,13 +58,12 @@ def create_ellipsoid_mask(
 
     return mask
 
-def create_masks_for_subset(
+def create_masks_for_subset(  #process a single subset and create masks for all scans
         subset_dir: Path,
         annotations: pd.DataFrame,
         output_dir: Path,
         subset_name: str
 ) -> dict:
-    """processes a single subset and creates masks for all scans"""
 
     # Create subset folder in output directory
     subset_output_dir = output_dir / subset_name
@@ -112,9 +111,8 @@ def create_masks_for_subset(
                 world_coordinates = np.array([row['coordX'], row['coordY'], row['coordZ']])
                 diameter_mm = row['diameter_mm']
                 radius_mm = diameter_mm / 2.0
-
-                voxel_coords_xyz = world_to_voxel(world_coordinates, origin, spacing)  #converts world coords to voxel
-                voxel_x, voxel_y, voxel_z = voxel_coords_xyz
+                voxel_coords = scan_sitk.TransformPhysicalPointToIndex(world_coordinates.tolist())
+                voxel_x, voxel_y, voxel_z = voxel_coords
 
                 if (0 <= voxel_z < shape[0] and 0 <= voxel_y < shape[1] and 0 <= voxel_x < shape[2]):
                     #create ellipsoid mask for the nodule
@@ -137,7 +135,7 @@ def create_masks_for_subset(
                     print(f"Nodule center outside scan bounds")
                     nodules_skipped += 1
 
-        # --- Save mask using original UID instead of hash ---
+        # ---- save mask using original UID instead of hash ----
         output_path = subset_output_dir / f"{series_uid}_mask.npy"
         np.save(output_path, mask)
 
@@ -211,22 +209,5 @@ def create_masks_for_all_subsets(
     print(f"Total nodules created: {overall_stats['total_nodules_created']}")
     print(f"Nodules skipped (out of bounds): {overall_stats['nodules_skipped']}")
 
-def main():
-    parser = argparse.ArgumentParser(description="Create segmentation masks for LUNA16 CT scans")
-    parser.add_argument("--base_dir", type=str, required=True,
-                        help="Path to LUNA16 data")
-    parser.add_argument("--annotations", type=str, required=True,
-                        help="Path to annotations.csv file")
-    parser.add_argument("--output_dir", type=str, required=True,
-                        help="Path to output directory for masks")
-    parser.add_argument("--num_subsets", type=int, default=10,
-                        help="Number of subsets to process (default: 10)")
 
-    args = parser.parse_args()
-
-    print("Creating segmentation masks for all LUNA16 subsets...")
-    create_masks_for_all_subsets(args.base_dir, args.annotations, args.output_dir, num_subsets=args.num_subsets)
-    print("\nDone!")
-
-if __name__ == "__main__":
-    main()
+create_masks_for_all_subsets(BASE_DIR, ANNOTATIONS_FILE, OUTPUT_DIR, NUM_SUBSETS)
