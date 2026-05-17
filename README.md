@@ -20,25 +20,38 @@ Thorough data preprocessing is necessary for reliable and accurate model. It con
 
 ### Segmentation Masks for Nodules
 
-Uses **annotations.csv** to locate nodules on a CT scan, and creates a binary mask with a filled ellipsoid accounting for anisotropic voxel spacing. Segmented masks are used as target value for U-Net model. Radius is converted from mm to voxel dimension (x,y,z -> z,y,x for array indexing). Different number of voxels create **ellipsoid** in voxel space (sphere in physical).
+Segmented binary masks are used as target value for U-Net model. They are created as **anisotropic ellipsoids** rather than spheres to correctly represent each nodule's extent in voxel space given the non-uniform voxel spacing of CT scanners. Nodule centers from the LUNA16 annotations are provided in world coordinates (mm) and are converted to voxel indices using each scan's origin and spacing metadata.
 
 ### Lung Masks
 
-We've segmented **lung parenchyma** from CT scans to filter out bone, heart or muscle tissue. This reduces detection area and false positives, as model can mistake other tissue as nodule. Everything outside lungs is converted to black color, that is **HU value of air** (~ -1000). Lung masks are used during patch extraction, to focus it on lung tissue.
+**Lung parenchyma**, is segmented using HU thresholding ([-1000, -400]). Algorithm utilizes flood-fill technique to first remove external air from CT slice, followed by labelling connected components inside interior mask. If any component is greater than 0.8 times median of largest two components, then two lungs touch visually in that slice and they appear as one blob. For the purpose of accurate diagnosis, it is necessary to split them into two regions. That is done by eroding that region until two separate seeds are left, followed by reconstruction of lungs through Voronoi partition where every voxel in original mask gets assigned to seed closest to it. At the end, noise was removed and lung masks were mapped to original CT scans. Only lung voxels keep their value.
 
 ### Patch Extraction
 
-Script extracts **64x64x64** 3D patches for training segmentation model. Prior to that, **Hounsfield Units** (HU - the standard unit for CT scan pixel intensity values) are normalized to [0,1] range for neural network imput. On each scan 80 patches was extracted (71,040 patches in total).
+Training on entire CT scans would be computationally heavy. Instead, script extracts 3D patches for training segmentation model. Prior to that, **Hounsfield Units** (HU - the standard unit for CT scan pixel intensity values) are normalized to [0,1] range for neural network imput. On each scan 80 patches was extracted (71,040 patches in total).
 
 For each scan, it extracts:
  - **Positive patches**: Centered around nodule locations (from the mask) with random jitter
  - **Negative patches**: Random locations within the lung tissue (using pre-computed lung voxel coordinates)
 
-Ratio of positive to negative patches is 7:3. This, however, doesn't introduce class imbalance because nodules are small, and model **needs more exposure** to nodule samples because even on positive scans they occupy around **1%** of an image at most. Nodules in patches should be spread across entire patch, and not located in the middle always. If all patches had centered nodules, U-Net would produce suboptimal results during inference on full scans.
+Around 60% of patches contain nodules. This, however, doesn't introduce class imbalance because nodules are small, and model **needs more exposure** to nodule samples because even on positive scans they occupy around **1%** of an image at most. Nodules in patches should be spread across entire patch, and not located in the middle always. If all patches had centered nodules, U-Net would produce suboptimal results during inference on full scans.
 
 ### Train-Test-Val Split
 
-We've tried many splits, namely random splitting patients inside each LUNA16 subfolder (0.7 for train, 0.1 for val and 0.2 for test) and stratified data splitting, categorizing data based on nodule diametar. Both methods produced poor models, because random split created **class imbalance** among nodules by separating most large (>15mm) in test, medium (10-15mm) in train and small (<10mm) nodules in validation set. Nodule diametar also plays minor role, as nodules with different number of voxels can have same diametar. That is why **stratified voxel split** produced the best and most generalizable results. It ensures that each set is balanced based on count of voxels in nodules.
+In search for efficient sampling strategy, it would be wrong to opt for random sampling. It sounds as reasonable option, but nodule count across scans varies enormously. Some scans have no nodules at all, some have a single sub-millimeter nodule, and some have multiple large masses with tens of thousands of positive voxels each.
+
+To solve problem of class imbalance and propose efficient alternative to 10-fold cross validation, we introduced **stratified voxel split**. It is a dataset partitioning strategy that ensures train, validation, and test sets have statistically similar distributions of total nodule voxel counts per scan. Each scan is binned in into one of five strata based on data-driven percentile thresholds computed from the full dataset. stratification uses (π/6) * d³ sphere volume, which is a diameter-cubed proxy. This is better than raw diameter (closer to volume), but it is not actual voxel counts. The thresholds are in mm³, not voxels. Scans without no nodules at all are placed in no-nodules strata. This is important because no-nodule scans are necessary to teach the model to suppress false positives. If we exclude them from splitting logic, it would silently corrupt all three sets.
+
+**Table I: Stratum Distribution by Split**
+
+| Stratum    | Train | Val | Test |
+|------------|-------|-----|------|
+| no_nodules | 200   | 30  | 57   |
+| tiny       | 105   | 15  | 30   |
+| small      | 105   | 15  | 30   |
+| medium     | 105   | 15  | 30   |
+| large      | 105   | 16  | 30   |
+| **Total**  | **620**| **91** | **177** |
 
 ---
 
