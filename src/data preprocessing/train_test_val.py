@@ -19,7 +19,6 @@ def build_subset_mapping(scan_dirs: List[Tuple[int, str]]) -> Tuple[Dict[int, Li
 
     return dict(subset_to_uids), uid_to_subset
 
-
 def load_nodule_volumes(annotations_csv: str, all_uids: List[str]) -> Tuple[Dict[str, Dict], Dict]:
     df = pd.read_csv(annotations_csv)
 
@@ -85,7 +84,6 @@ def load_nodule_volumes(annotations_csv: str, all_uids: List[str]) -> Tuple[Dict
 
     return scan_stats, percentiles
 
-
 def assign_voxel_stratum(total_voxels: float, percentiles: Dict) -> str:
     if total_voxels == 0:
         return 'no_nodules'
@@ -97,7 +95,6 @@ def assign_voxel_stratum(total_voxels: float, percentiles: Dict) -> str:
         return 'medium'
     else:
         return 'large'
-
 
 def split_uids_stratified(
         uids: List[str],
@@ -144,7 +141,6 @@ def split_uids_stratified(
         }
 
     return train_all, test_all, val_all, stratum_info
-
 
 def luna16_splits(
         scan_dirs: List[Tuple[int, str]],
@@ -202,7 +198,6 @@ def luna16_splits(
     os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
     with open(output_path, 'w') as f:
         json.dump(splits, f, indent=2)
-
 
 def main():
     BASE_DIR    = ".../luna16_OG"
