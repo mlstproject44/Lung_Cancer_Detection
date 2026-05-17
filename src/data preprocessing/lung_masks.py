@@ -7,8 +7,8 @@ import SimpleITK as sitk
 MIN_LUNG_AREA = 1500
 MIN_SPLIT_FRACTION = 0.10
 AIR_THRESHOLD = -400
-BASE_DIR = Path("/home/jovyan/luna16_OG")
-OUTPUT_DIR = Path("/home/jovyan/vol.2/segmented_lungs")
+BASE_DIR = Path(".../luna16_OG")
+OUTPUT_DIR = Path(".../segmented_lungs")
 
 
 def binarize(scan_array: np.ndarray, threshold: int = AIR_THRESHOLD) -> np.ndarray:

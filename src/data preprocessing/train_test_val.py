@@ -1,121 +1,78 @@
 import json
 import os
 import numpy as np
+import pandas as pd
 from pathlib import Path
 from typing import Dict, List, Tuple
 from collections import defaultdict
-from tqdm import tqdm
+
 
 def build_subset_mapping(scan_dirs: List[Tuple[int, str]]) -> Tuple[Dict[int, List[str]], Dict[str, int]]:
-    """builds bidirectional mapping between subsets and UIDs"""
     subset_to_uids = defaultdict(list)
     uid_to_subset = {}
-    for subset_number, scan_dir in scan_dirs:  #iterates through subsets
+    for subset_number, scan_dir in scan_dirs:
         scan_path = Path(scan_dir)
         for mhd_file in scan_path.glob('*.mhd'):
-            uid = mhd_file.stem  #filename without extension
-            subset_to_uids[subset_number].append(uid)  #adds UID to the list for given subset
-            uid_to_subset[uid] = subset_number  #maps UID to its subset number
+            uid = mhd_file.stem
+            subset_to_uids[subset_number].append(uid)
+            uid_to_subset[uid] = subset_number
 
     return dict(subset_to_uids), uid_to_subset
 
-def load_voxel_characteristics(patch_dir: str, all_uids: List[str]) -> Tuple[Dict[str, Dict], Dict]:
-    """loads actual voxel counts from extracted patches for stratification"""
 
-    print("Analyzing patch voxel distribution for stratification...")
-    patch_dir_path = Path(patch_dir)
+def load_nodule_volumes(annotations_csv: str, all_uids: List[str]) -> Tuple[Dict[str, Dict], Dict]:
+    df = pd.read_csv(annotations_csv)
+
+    #normalize column names
+    df.columns = df.columns.str.strip()
+    uid_col = next((c for c in df.columns if 'uid' in c.lower()), None)
+    diam_col = next((c for c in df.columns if 'diameter' in c.lower()), None)
+
+    df = df.dropna(subset=[uid_col, diam_col])
 
     scan_stats = {}
 
-    #check all possible split directories for patches
-    for split_name in ['train', 'val', 'test', '']:  # '' for flat structure
-        if split_name:
-            split_dir = patch_dir_path / split_name
-        else:
-            split_dir = patch_dir_path
-
-        metadata_file = split_dir / "metadata.json"
-
-        if not metadata_file.exists():
+    for series_uid, group in df.groupby(uid_col):
+        diameters = group[diam_col].values
+        if len(diameters) == 0:
             continue
+        volumes_mm3 = (np.pi / 6.0) * (diameters ** 3)  #nodule volume as sphere: V = (π/6) * d³
+        total_volume = float(np.sum(volumes_mm3))
 
-        with open(metadata_file, 'r') as f:
-            metadata = json.load(f)
+        scan_stats[series_uid] = {
+            'series_uid': series_uid,
+            'total_nodule_voxels': total_volume,  #mm³ volume as voxel proxy
+            'num_nodules': len(diameters),
+            'mean_diameter': float(np.mean(diameters)),
+            'max_diameter': float(np.max(diameters)),
+        }
 
-        print(f"  Found {len(metadata)} patches in {split_dir.name or 'root'}/")
-
-        #group patches by series_uid
-        uid_patches = defaultdict(list)
-        for record in metadata:
-            uid_patches[record['series_uid']].append(record['filename'])
-
-        #analyze each scan's patches
-        for series_uid, patch_filenames in tqdm(uid_patches.items(), desc=f"  Analyzing {split_name or 'patches'}"):
-            if series_uid not in scan_stats:
-                scan_stats[series_uid] = {
-                    'series_uid': series_uid,
-                    'total_nodule_voxels': 0,
-                    'num_patches': 0,
-                    'num_positive_patches': 0
-                }
-
-            for filename in patch_filenames:
-                patch_path = split_dir / filename
-
-                if not patch_path.exists():
-                    continue
-
-                try:
-                    data = np.load(patch_path)
-                    mask = data['mask']
-
-                    #count positive voxels
-                    if mask.dtype == np.uint8:
-                        positive_voxels = int((mask > 0).sum())
-                    else:
-                        positive_voxels = int((mask > 0.5).sum())
-
-                    scan_stats[series_uid]['num_patches'] += 1
-
-                    if positive_voxels > 0:
-                        scan_stats[series_uid]['total_nodule_voxels'] += positive_voxels
-                        scan_stats[series_uid]['num_positive_patches'] += 1
-
-                    data.close()
-                except Exception as e:
-                    continue
-
-    #add scans without patches (no nodules)
+    #scans not in annotations have no annotated nodules
     for uid in all_uids:
         if uid not in scan_stats:
             scan_stats[uid] = {
                 'series_uid': uid,
-                'total_nodule_voxels': 0,
-                'num_patches': 0,
-                'num_positive_patches': 0
+                'total_nodule_voxels': 0.0,
+                'num_nodules': 0,
+                'mean_diameter': 0.0,
+                'max_diameter': 0.0,
             }
 
-    #compute percentiles for stratification
-    all_voxel_counts = [s['total_nodule_voxels'] for s in scan_stats.values() if s['total_nodule_voxels'] > 0]
+    all_volumes = [s['total_nodule_voxels'] for s in scan_stats.values() if s['total_nodule_voxels'] > 0]
 
-    if len(all_voxel_counts) > 0:
+    if all_volumes:
         percentiles = {
-            'p25': float(np.percentile(all_voxel_counts, 25)),
-            'p50': float(np.percentile(all_voxel_counts, 50)),
-            'p75': float(np.percentile(all_voxel_counts, 75)),
-            'p90': float(np.percentile(all_voxel_counts, 90))
+            'p25': float(np.percentile(all_volumes, 25)),
+            'p50': float(np.percentile(all_volumes, 50)),
+            'p75': float(np.percentile(all_volumes, 75)),
+            'p90': float(np.percentile(all_volumes, 90)),
         }
     else:
-        percentiles = {'p25': 0, 'p50': 0, 'p75': 0, 'p90': 0}
+        percentiles = {'p25': 0.0, 'p50': 0.0, 'p75': 0.0, 'p90': 0.0}
 
-    print(f"\nVoxel count percentiles:")
-    print(f"  25th: {percentiles['p25']:,.0f} voxels")
-    print(f"  50th: {percentiles['p50']:,.0f} voxels")
-    print(f"  75th: {percentiles['p75']:,.0f} voxels")
-
-    #assign voxel-based strata
+    #assign strata
     strata_counts = defaultdict(int)
-    for series_uid, stats in scan_stats.items():
+    for stats in scan_stats.values():
         stratum = assign_voxel_stratum(stats['total_nodule_voxels'], percentiles)
         stats['stratum'] = stratum
         strata_counts[stratum] += 1
@@ -124,43 +81,41 @@ def load_voxel_characteristics(patch_dir: str, all_uids: List[str]) -> Tuple[Dic
     print("\nStratum distribution:")
     for stratum in ['no_nodules', 'tiny', 'small', 'medium', 'large']:
         count = strata_counts.get(stratum, 0)
-        print(f"  {stratum:<15} {count:>4} scans ({count/len(scan_stats)*100:.1f}%)")
+        print(f"  {stratum:<15} {count:>4} scans ({count / len(scan_stats) * 100:.1f}%)")
 
     return scan_stats, percentiles
 
-def assign_voxel_stratum(total_voxels: int, percentiles: Dict) -> str:
-    """assigns stratum based on total nodule voxels using percentiles."""
+
+def assign_voxel_stratum(total_voxels: float, percentiles: Dict) -> str:
     if total_voxels == 0:
         return 'no_nodules'
     elif total_voxels < percentiles['p25']:
-        return 'tiny'       # < 25th percentile
+        return 'tiny'
     elif total_voxels < percentiles['p50']:
-        return 'small'      # 25th-50th percentile
+        return 'small'
     elif total_voxels < percentiles['p75']:
-        return 'medium'     # 50th-75th percentile
+        return 'medium'
     else:
-        return 'large'      # > 75th percentile
+        return 'large'
+
 
 def split_uids_stratified(
         uids: List[str],
         scan_stats: Dict[str, Dict],
-        train_ratio: float=0.7,
-        test_ratio: float=0.2,
-        val_ratio: float=0.1,
-        random_seed: int=42
+        train_ratio: float = 0.7,
+        test_ratio: float = 0.2,
+        val_ratio: float = 0.1,
+        random_seed: int = 42,
 ) -> Tuple[List[str], List[str], List[str], Dict]:
-    """split UIDs with stratification by nodule size"""
 
     assert abs(train_ratio + test_ratio + val_ratio - 1.0) < 1e-6
     rng = np.random.RandomState(random_seed)
 
-    #group UIDs by stratum
     strata_uids = defaultdict(list)
     for uid in uids:
         stratum = scan_stats[uid]['stratum']
         strata_uids[stratum].append(uid)
 
-    #split each stratum separately
     train_all, test_all, val_all = [], [], []
     stratum_info = {}
 
@@ -178,30 +133,28 @@ def split_uids_stratified(
         test_all.extend(test_uids)
         val_all.extend(val_uids)
 
-        #calculate voxel statistics for this stratum
-        voxel_counts = [scan_stats[uid].get('total_nodule_voxels', 0) for uid in stratum_uids_list]
-
+        volumes = [scan_stats[uid]['total_nodule_voxels'] for uid in stratum_uids_list]
         stratum_info[stratum] = {
-            'total': len(stratum_uids_list),
+            'total': n,
             'train': len(train_uids),
             'test': len(test_uids),
             'val': len(val_uids),
-            'mean_voxels': float(np.mean(voxel_counts)),
-            'median_voxels': float(np.median(voxel_counts))
+            'mean_volume_mm3': float(np.mean(volumes)),
+            'median_volume_mm3': float(np.median(volumes)),
         }
 
     return train_all, test_all, val_all, stratum_info
 
+
 def luna16_splits(
         scan_dirs: List[Tuple[int, str]],
         output_path: str,
-        patch_dir: str,
-        train_ratio: float=0.7,
-        test_ratio: float=0.2,
-        val_ratio: float=0.1,
-        random_seed: int=42
+        annotations_csv: str,
+        train_ratio: float = 0.7,
+        test_ratio: float = 0.2,
+        val_ratio: float = 0.1,
+        random_seed: int = 42,
 ) -> None:
-    """creates train/val/test splits with voxel-based stratification"""
 
     subset_to_uids, uid_to_subset = build_subset_mapping(scan_dirs)
 
@@ -209,105 +162,62 @@ def luna16_splits(
     for uids in subset_to_uids.values():
         all_uids.extend(uids)
 
-    print("Creating voxel stratified splits")
-
-    scan_stats, percentiles = load_voxel_characteristics(patch_dir, all_uids)
+    scan_stats, percentiles = load_nodule_volumes(annotations_csv, all_uids)
     train_uids, test_uids, val_uids, stratum_info = split_uids_stratified(
         all_uids, scan_stats, train_ratio, test_ratio, val_ratio, random_seed
     )
+
+    #overlap check
+    assert not (set(train_uids) & set(val_uids)), "Train/val overlap detected"
+    assert not (set(val_uids) & set(test_uids)), "Val/test overlap detected"
+    assert not (set(train_uids) & set(test_uids)), "Train/test overlap detected"
+
+    train_vols = [scan_stats[uid]['total_nodule_voxels'] for uid in train_uids]
+    val_vols = [scan_stats[uid]['total_nodule_voxels'] for uid in val_uids]
+    test_vols = [scan_stats[uid]['total_nodule_voxels'] for uid in test_uids]
 
     splits = {
         'train': train_uids,
         'test': test_uids,
         'val': val_uids,
-        'stratum_info': stratum_info
+        'metadata': {
+            'train_ratio': train_ratio,
+            'test_ratio': test_ratio,
+            'val_ratio': val_ratio,
+            'random_seed': random_seed,
+            'total_scans': len(all_uids),
+            'stratification': 'voxel_volume',
+            'strata': ['no_nodules', 'tiny', 'small', 'medium', 'large'],
+            'percentiles_mm3': percentiles,
+        },
+        'stratum_info': stratum_info,
+        'overall_volume_stats': {
+            'train_median_mm3': float(np.median(train_vols)),
+            'val_median_mm3': float(np.median(val_vols)),
+            'test_median_mm3': float(np.median(test_vols)),
+        },
+        'uid_to_subset': uid_to_subset,
     }
 
-    splits['metadata'] = {
-        'train_ratio': train_ratio,
-        'test_ratio': test_ratio,
-        'val_ratio': val_ratio,
-        'random_seed': random_seed,
-        'total_scans': len(all_uids),
-        'stratification': 'voxel_count',
-        'strata': ['no_nodules', 'tiny', 'small', 'medium', 'large'],
-        'percentiles': percentiles
-    }
-
-    #overall voxel statistics
-    train_voxels = [scan_stats[uid]['total_nodule_voxels'] for uid in train_uids]
-    val_voxels = [scan_stats[uid]['total_nodule_voxels'] for uid in val_uids]
-    test_voxels = [scan_stats[uid]['total_nodule_voxels'] for uid in test_uids]
-
-    splits['overall_voxel_stats'] = {
-        'train_median': float(np.median(train_voxels)),
-        'val_median': float(np.median(val_voxels)),
-        'test_median': float(np.median(test_voxels))
-    }
-
-    print("Stratification results")
-    for stratum, info in sorted(stratum_info.items()):
-        print(f"\n{stratum.upper()}:")
-        print(f"  Total:  {info['total']:>3} ({info['total']/len(all_uids)*100:.1f}%)")
-        print(f"  Train:  {info['train']:>3} ({info['train']/max(1, info['total'])*100:.0f}%)")
-        print(f"  Val:    {info['val']:>3} ({info['val']/max(1, info['total'])*100:.0f}%)")
-        print(f"  Test:   {info['test']:>3} ({info['test']/max(1, info['total'])*100:.0f}%)")
-        if info['median_voxels'] > 0:
-            print(f"Median voxels: {info['median_voxels']:,.0f}")
-
-    print(f"Train: {len(train_uids)} scans ({len(train_uids)/len(all_uids)*100:.1f}%)")
-    print(f"Val:   {len(val_uids)} scans ({len(val_uids)/len(all_uids)*100:.1f}%)")
-    print(f"Test:  {len(test_uids)} scans ({len(test_uids)/len(all_uids)*100:.1f}%)")
-    print("="*80)
-
-    splits['uid_to_subset'] = uid_to_subset
     os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
     with open(output_path, 'w') as f:
         json.dump(splits, f, indent=2)
 
-    print(f"\n✓ Splits saved to: {output_path}")
 
 def main():
-    import argparse
+    BASE_DIR    = ".../luna16_OG"
+    ANNOTATIONS = ".../annotations.csv"
+    OUTPUT      = ".../luna16_splits.json"
+    NUM_SUBSETS = 10
 
-    parser = argparse.ArgumentParser(
-        description="Create train/val/test splits for LUNA16 dataset with voxel-based stratification",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-
-    parser.add_argument("--base_dir", type=str, required=True,
-                        help="Path to LUNA16 data")
-    parser.add_argument("--output", type=str, required=True,
-                        help="Output path for splits JSON file")
-    parser.add_argument("--patch_dir", type=str, required=True,
-                        help="Path to extracted patches for voxel-based stratification")
-    parser.add_argument("--num_subsets", type=int, default=10,
-                        help="Number of subsets to process (default: 10)")
-    parser.add_argument("--train_ratio", type=float, default=0.7,
-                        help="Training set ratio (default: 0.7)")
-    parser.add_argument("--val_ratio", type=float, default=0.1,
-                        help="Validation set ratio (default: 0.1)")
-    parser.add_argument("--test_ratio", type=float, default=0.2,
-                        help="Test set ratio (default: 0.2)")
-    parser.add_argument("--seed", type=int, default=42,
-                        help="Random seed for reproducibility (default: 42)")
-
-    args = parser.parse_args()
-
-    scan_dirs = [
-        (i, os.path.join(args.base_dir, f"subset{i}"))
-        for i in range(args.num_subsets)
-    ]
+    scan_dirs = [(i, os.path.join(BASE_DIR, f"subset{i}")) for i in range(NUM_SUBSETS)]
 
     luna16_splits(
         scan_dirs=scan_dirs,
-        output_path=args.output,
-        patch_dir=args.patch_dir,
-        train_ratio=args.train_ratio,
-        test_ratio=args.test_ratio,
-        val_ratio=args.val_ratio,
-        random_seed=args.seed
+        output_path=OUTPUT,
+        annotations_csv=ANNOTATIONS,
     )
+
 
 if __name__ == "__main__":
     main()

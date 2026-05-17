@@ -8,9 +8,9 @@ import SimpleITK as sitk
 from pathlib import Path
 from typing import Tuple
 
-BASE_DIR = "/home/jovyan/luna16_OG"
-ANNOTATIONS_FILE = "/home/jovyan/annotations.csv"
-OUTPUT_DIR = "/home/jovyan/vol.2/segmentation_masks"
+BASE_DIR = ".../luna16_OG"
+ANNOTATIONS_FILE = ".../annotations.csv"
+OUTPUT_DIR = ".../segmentation_masks"
 NUM_SUBSETS = 10
 
 def create_ellipsoid_mask(  #creates a binary mask with a filled ellipsoid accounting for anisotropic voxel spacing
