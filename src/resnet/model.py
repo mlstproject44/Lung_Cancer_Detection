@@ -1,9 +1,7 @@
 import torch
 import torch.nn as nn
 
-
 class ResidualBlock3D(nn.Module):
-    """Basic 3D residual block."""
 
     def __init__(self, in_channels, out_channels, stride=1, dropout=0.0):
         super().__init__()
@@ -33,8 +31,6 @@ class ResidualBlock3D(nn.Module):
 
 
 class ResNet3D_18(nn.Module):
-    """3D ResNet-18 for binary classification."""
-
     def __init__(self, in_channels=1, num_classes=1, dropout=0.3):
         super().__init__()
         self.conv1 = nn.Conv3d(in_channels, 64, kernel_size=7, stride=2, padding=3)
@@ -81,8 +77,6 @@ class ResNet3D_18(nn.Module):
 
 
 class ResNet3D_34(nn.Module):
-    """3D ResNet-34 for binary classification."""
-
     def __init__(self, in_channels=1, num_classes=1, dropout=0.3):
         super().__init__()
         self.conv1 = nn.Conv3d(in_channels, 64, kernel_size=7, stride=2, padding=3)

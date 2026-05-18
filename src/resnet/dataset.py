@@ -4,15 +4,11 @@ from torch.utils.data import Dataset
 from pathlib import Path
 from tqdm import tqdm
 
-
 class TrainDataset(Dataset):
-    """Training dataset - loads directly from patch directory."""
-
     def __init__(self, train_dir, neg_pos_ratio=20, transform=None):
         self.train_dir = Path(train_dir)
         self.transform = transform
 
-        print("Scanning training directory...")
         all_files = list(self.train_dir.glob("*.npz"))
 
         self.positive_files = []
@@ -40,10 +36,10 @@ class TrainDataset(Dataset):
         self.files = self.positive_files + self.negative_files
 
         print(f"\nTraining dataset:")
-        print(f"  Positives: {len(self.positive_files)}")
-        print(f"  Negatives: {len(self.negative_files)}")
-        print(f"  Total: {len(self.files)}")
-        print(f"  Ratio: 1:{len(self.negative_files)/max(len(self.positive_files),1):.1f}")
+        print(f"Positives: {len(self.positive_files)}")
+        print(f"Negatives: {len(self.negative_files)}")
+        print(f"Total: {len(self.files)}")
+        print(f"Ratio: 1:{len(self.negative_files)/max(len(self.positive_files),1):.1f}")
 
     def __len__(self):
         return len(self.files)
@@ -60,8 +56,6 @@ class TrainDataset(Dataset):
 
 
 class ValidationDataset(Dataset):
-    """Validation dataset - loads all patches from directory."""
-
     def __init__(self, val_dir):
         self.val_dir = Path(val_dir)
         self.files = list(self.val_dir.glob("*.npz"))
@@ -79,10 +73,10 @@ class ValidationDataset(Dataset):
                 pass
 
         print(f"Validation dataset:")
-        print(f"  Positives: {self.num_pos}")
-        print(f"  Negatives: {self.num_neg}")
-        print(f"  Total: {len(self.files)}")
-        print(f"  Ratio: 1:{self.num_neg/max(self.num_pos,1):.1f}")
+        print(f"Positives: {self.num_pos}")
+        print(f"Negatives: {self.num_neg}")
+        print(f"Total: {len(self.files)}")
+        print(f"Ratio: 1:{self.num_neg/max(self.num_pos,1):.1f}")
 
     def __len__(self):
         return len(self.files)

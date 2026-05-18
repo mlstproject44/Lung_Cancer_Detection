@@ -13,8 +13,6 @@ from dataset import TrainDataset, ValidationDataset
 
 
 class RandomFlip3D:
-    """Randomly flip 3D volume along each axis."""
-
     def __init__(self, prob=0.5):
         self.prob = prob
 
@@ -27,10 +25,7 @@ class RandomFlip3D:
             volume = torch.flip(volume, [3])
         return volume
 
-
 class RandomRotate90_3D:
-    """Randomly rotate 3D volume by 90 degrees in axial plane."""
-
     def __init__(self, prob=0.5):
         self.prob = prob
 
@@ -41,10 +36,7 @@ class RandomRotate90_3D:
                 volume = torch.rot90(volume, k, [2, 3])
         return volume
 
-
 class RandomIntensityShift:
-    """Slight intensity shift for robustness."""
-
     def __init__(self, shift_range=0.05, prob=0.3):
         self.shift_range = shift_range
         self.prob = prob
@@ -58,8 +50,6 @@ class RandomIntensityShift:
 
 
 class Compose:
-    """Compose multiple transforms."""
-
     def __init__(self, transforms):
         self.transforms = transforms
 
@@ -70,7 +60,6 @@ class Compose:
 
 
 def get_train_transforms(flip_prob=0.5, rotate_prob=0.5, intensity_shift=0.05):
-    """Create standard training augmentation pipeline."""
     return Compose([
         RandomFlip3D(prob=flip_prob),
         RandomRotate90_3D(prob=rotate_prob),
@@ -79,8 +68,6 @@ def get_train_transforms(flip_prob=0.5, rotate_prob=0.5, intensity_shift=0.05):
 
 
 class FocalLoss(nn.Module):
-    """Focal Loss for handling class imbalance."""
-
     def __init__(self, alpha=0.75, gamma=2.0):
         super().__init__()
         self.alpha = alpha
@@ -95,7 +82,6 @@ class FocalLoss(nn.Module):
 
 
 def find_threshold_for_sensitivity(labels, probs, target_sens=0.90):
-    """Find the threshold that achieves target sensitivity."""
     sorted_indices = np.argsort(-probs)
     sorted_labels = labels[sorted_indices]
     sorted_probs = probs[sorted_indices]
@@ -117,7 +103,6 @@ def find_threshold_for_sensitivity(labels, probs, target_sens=0.90):
 
 
 def validate_model(model, val_loader, criterion, device, target_sensitivity=0.90):
-    """Validate with threshold calibration for target sensitivity."""
     model.eval()
 
     total_loss = 0
