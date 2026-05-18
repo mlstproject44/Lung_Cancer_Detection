@@ -57,19 +57,19 @@ To solve problem of class imbalance and propose efficient alternative to 10-fold
 
 ## Stage 1: Candidates Generation
 
-First part of the pipeline is to go through CT scans and generate candidates, that is potential lung nodules. Training goals are to achieve high recall (**>90%**) to capture all positives, and maximize precision as much as possible.
+First part of the pipeline is to go through CT scans and generate candidates, that is potential lung nodules. Training goals are to achieve high recall (**>90%**) to capture all true positives, and maximize precision as much as possible.
 
 ### U-Net Architecture
 
-**U-Net** is powerful Convolutional Neural Network architecture, named for its U-shaped design. It is primarily used for image segmentation and we decided to use it because it precisely outlines objects of interest (nodules), even with limited data. We build  **5-level U-Net** (4 encoder/decoder levels + 1 bottleneck level) to successfully capture essential nodule features. Attention gates are added at the end of every skip connection to filter irrelevant skip connection features. Dropout is added for regularization and gradient checkpoint as optional memory optimization.
+U-Net serves as the candidate generation stage of the two-stage nodule detection pipeline. Given a preprocessed 96x96x96 voxel patch extracted from a CT scan, the model produces a binary segmentation mask that indicates the probability of each voxel belonging to a nodule. The architecture has been extended from the basic U-Net, to operate on three-dimensional data and augmented with custom covariance attention gates and residual connections, which basically gives us a 3D Attention U-Net architecture tailored for LUNA16 dataset and challenge.
+
+Within the two-stage detection framework, the 3D Attention U-Net serves exclusively as a candidate generation module. Its task is to produce a segmentation map over the input patch, identifying all voxels that may belong to a nodule. The objective at this stage is to maximise recall-ensuring that true nodules are not missed-even at the cost of generating false positive candidates
 
 ### Training the model
 
-To achieve target recall without overfitting, we tried many combinations of **focal loss**, **dice loss** and **Binary Cross Entropy with logits loss**. Our final model was trained using **0.7 * bce + 0.3 * dice** (which doesn't imply that it is the best combination of weights, only that it worked). Among other parameters, we used batch size of **16**, learning rate of **0.001** and **50** epochs. Interesting parameter is positive fraction of **0.7**, which ensures that 70% of patches model is exposed to have nodules. Since nodules are small, even positive patches are mostly background so this ensures enough exposure. 
+The model is trained using a weighted combination of three loss terms: 0.4 * BCE + 0.35 * Focal + 0.25 * Dice. Binary Cross-Entropy (BCE) handles per-voxel classification with a positive class weight of 10 to account for the severe class imbalance between nodule and background voxels. A Channel-Aware Focal Loss is also included, which dynamically increases the positive weight based on the mean channel importance across the attention gates. Dice loss directly optimizes the overlap between the predicted and ground-truth nodule masks, which is especially important under class imbalance since it is naturally insensitive to the large number of true negatives.
 
-Epoch we decided to use as final model had recall of **87%** and **19%** precision. However, because of strong generalizability, model had **92%** recall and **25%** precision on test set.
-
-To generate candidates, we ran trained U-Net through original CT scans from LUNA16 dataset using sliding windows. To label found candidates, we used annotations.csv file from LUNA16 website, which contains locations of true positives (all others are false positives). U-Net generated **100,374** total candidates, among which 995 were positives. At this point, we moved to stage 2.
+The model is trained with AdamW using two separate parameter groups: the main network parameters use a learning rate of 10^−4 with weight decay 10^−5, while the learnable channel importance scalars use a higher learning rate of 10−2 with no weight decay. A ReduceLROnPlateau scheduler reduces the learning rate by a factor of 0.5 after 3 epochs without improvement in validation loss, with a minimum learning rate of 10^−6.
 
 ---
 
@@ -77,7 +77,7 @@ To generate candidates, we ran trained U-Net through original CT scans from LUNA
 
 ### Data processing
 
-To prepare data for training **ResNet** we had to repeat patch extraction process, this time around candidates. Extraction process was pretty much the same as for U-Net. Voxel stratified split from stage 1 was used too.
+To prepare data for training **ResNet** we had to repeat patch extraction process, this time around candidates. Extraction process was pretty much the same as for U-Net. Voxel stratified split from stage 1 was used.
 
 ### Hard-negatives or Random Sampling?
 
@@ -85,13 +85,13 @@ Training with every extracted patch wouldn't be possible because of **extreme cl
 
 ### ResNet Architecture and Training
 
-To reduce false positives, we decided to use **ResNet-18** - another powerful Convolutional Neural Network with 18 layers. It is known for efficient use of residual blocks to combat vanishing gradients, which make it great complement to stage 1 U-Net. We trained ResNet, implementing padding for patches taken from edges and augmentation techniques, namely random rotation, random flip and random itensity shift to simulate different scan angles and noise levels. Using **Adam** as optimizer, **0.0001** learning rate,**BCE with logits loss** as loss function (because of class imbalance) we got astonishing results on test set - only **20 false negatives** and more than 20,000 false positives rejected. Around 204 false positives were classified as true nodules, however, certified supervisor would be able to spot the missclassification. Final metrics are: Test AUC: **0.941**, Sensitivity: **90.0%**, Specificity: **98.9%**.
+ResNet serves as the false positive reduction stage of the two-stage nodule detection pipeline. After generating the candidates for true nodules which we get using 3D Attention U-Net, this stage receives a set of candidate locations and classifies each as either a true nodule or a false positive. The U-Net stage prioritizes high recall, capturing as many true nodules as possible even at the cost of generating numerous false positives. The ResNet stage is designed to maximize precision by detecting whether the candidates are genuine nodules or anatomically similar structures such as blood vessels, airway walls, and scar tissue.
+
+The biggest problem in the false positive reduction stage is handling the imbalance of the classes between the positive and negative candidates (true positives and false positives). To address this imbalance, the present implementation employs weighted random sampling during training. This sampling method makes sure that each mini-batch consists of a balanced representation of positive and negative class. Weighted sampling prevents the classifier from learning only the majority class and forces it to learn discriminative features for true nodules. This approach is complemented by the use of Binary Cross-Entropy with Logits Loss, which, when combined with balanced sampling, has been shown to effectively handle imbalanced medical imaging classification tasks.
+
+The network is trained using Binary Cross-Entropy with Logits Loss, which combines a sigmoid activation with binary cross-entropy loss. This loss function is appropriate for binary classification tasks and, when combined with weighted sampling to address class imbalance, has been shown to achieve strong performance for false positive reduction. Optimization is performed using the Adam optimizer with a learning rate of 0.001. Adam was selected for its adaptive learning rate properties, which often lead to faster convergence compared to stochastic gradient descent, particularly in the early stages of training. A batch size of 32 is used, which balances computational efficiency with gradient stability given the memory constraints of 3D convolutions.
 
 ---
-
-## Demo APP
-
-You can find demo app on [this link](https://drive.google.com/drive/folders/1on5i8kU2F7qcIUXiWxasoV9Yc8U3-Q_F?usp=drive_link) and try it yourself.
 
 ## References
 
@@ -100,11 +100,6 @@ You can find demo app on [this link](https://drive.google.com/drive/folders/1on5
  - Hu, Q. et al. [Effective lung nodule detection using deep CNN with dual attention mechanisms](https://www.nature.com/articles/s41598-024-51833-x). *Sci Rep* (2024).
  - Wang, Y. et al. [An attention-based deep learning network for lung nodule malignancy discrimination](https://www.frontiersin.org/journals/neuroscience/articles/10.3389/fnins.2022.1106937/full). *Front Neurosci* (2022)
  - Hendrix, W., Hendrix, N., Scholten, E.T. et al. [Deep learning for the detection of benign and malignant pulmonary nodules in non-screening chest CT scans](https://doi.org/10.1038/s43856-023-00388-5) *Commun Med* 3, 156 (2023).
-
-### Datasets
-- LUNA16: https://luna16.grand-challenge.org/
-
-### Implementation References
 
 ---
 
