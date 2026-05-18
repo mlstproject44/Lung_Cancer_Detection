@@ -67,29 +67,21 @@ class Down(nn.Module):
         return self.conv(x)
 
 
-
-#COVARIANCE ATTENTION GATE
+# COVARIANCE ATTENTION GATE
 class CovarianceAttentionGate(nn.Module):
-    """
-    Cross-covariance channel attention gate.
-
-    For each skip channel, computes how much it co-varies with the
-    decoder's gating signal. Channels that statistically co-vary with
-    "what the decoder is currently searching for" get amplified.
-
-    A learnable per-channel importance scalar (C,) in [0,1] is also
-    maintained so the training loop can pass it to ChannelAwareFocalLoss.
-    """
-    def __init__(self, gate_channels: int, skip_channels: int, inter_channels: int):
+    def __init__(
+        self,
+        gate_channels: int,
+        skip_channels: int,
+        inter_channels: int,
+        covariance_dropout: float = 0.2,       # NEW
+    ):
         super().__init__()
-
-        # normalisation before cross-covariance (keeps activations stable)
         self.norm_g = nn.GroupNorm(min(8, gate_channels), gate_channels)
         self.norm_s = nn.GroupNorm(min(8, skip_channels), skip_channels)
-
         self.channel_importance_raw = nn.Parameter(torch.zeros(skip_channels))
-
         self.proj = nn.Conv3d(skip_channels, skip_channels, kernel_size=1, bias=True)
+        self.cov_dropout = nn.Dropout(p=covariance_dropout)               # NEW
 
     @property
     def channel_importance(self) -> torch.Tensor:
@@ -107,18 +99,18 @@ class CovarianceAttentionGate(nn.Module):
             scaling_factor = math.sqrt(N)
             s_f = s.float() / scaling_factor
             g_f = g.float() / scaling_factor
-
             cross_cov = torch.bmm(s_f, g_f.transpose(1, 2))  # (B, Cs, Cg)
 
-        relevance = torch.sigmoid(cross_cov.abs().mean(dim=2))  # (B, Cs), each in (0, 1)
+        cross_cov = self.cov_dropout(cross_cov)                           # NEW
 
+        relevance = torch.sigmoid(cross_cov.abs().mean(dim=2))  # (B, Cs)
         relevance = relevance.view(B, Cs, 1, 1, 1).to(skip.dtype)
         imp = self.channel_importance.view(1, Cs, 1, 1, 1)
 
         return self.proj(skip * (relevance * (1.0 + imp)))
 
 
-#UP BLOCK
+# UP BLOCK
 class Up(nn.Module):
     def __init__(
         self,
@@ -126,19 +118,19 @@ class Up(nn.Module):
         output_channels: int,
         dropout: float = 0.0,
         residual: bool = False,
-        attention: bool = False
+        attention: bool = False,
+        covariance_dropout: float = 0.2,       # NEW
     ):
         super().__init__()
-
         self.up = nn.ConvTranspose3d(input_channels, input_channels // 2, kernel_size=2, stride=2)
         self.conv = DoubleConv(input_channels, output_channels, dropout, residual)
-
         self.use_attention = attention
         if attention:
             self.attention_gate = CovarianceAttentionGate(
                 gate_channels=input_channels // 2,
                 skip_channels=input_channels // 2,
-                inter_channels=output_channels
+                inter_channels=output_channels,
+                covariance_dropout=covariance_dropout,                    # NEW
             )
 
     def forward(self, x1: torch.Tensor, x2: torch.Tensor) -> torch.Tensor:
@@ -149,7 +141,7 @@ class Up(nn.Module):
         return self.conv(x)
 
 
-#3-D U-NET
+# 3-D U-NET
 class UNet3D(nn.Module):
     def __init__(
         self,
@@ -157,7 +149,8 @@ class UNet3D(nn.Module):
         output_channels: int = 1,
         init_features: int = 48,
         dropout: float = 0.2,
-        checkpointing: bool = False
+        checkpointing: bool = False,
+        covariance_dropout: float = 0.2,       # NEW
     ):
         super().__init__()
 
@@ -166,27 +159,22 @@ class UNet3D(nn.Module):
         residual = True
         attention = True
 
-        #ENCODER
+        # ENCODER
         self.encoder1 = DoubleConv(input_channels, features, dropout, residual)
-        self.encoder2 = Down(features, features * 2, dropout, residual)
-        self.encoder3 = Down(features * 2, features * 4, dropout, residual)
-        self.encoder4 = Down(features * 4, features * 8, dropout, residual)
-
+        self.encoder2 = Down(features,      features * 2,  dropout, residual)
+        self.encoder3 = Down(features * 2,  features * 4,  dropout, residual)
+        self.encoder4 = Down(features * 4,  features * 8,  dropout, residual)
         self.bottleneck = Down(features * 8, features * 16, dropout, residual)
 
-        #DECODER
-        self.decoder4 = Up(features * 16, features * 8, dropout, residual, attention)
-        self.decoder3 = Up(features * 8,  features * 4, dropout, residual, attention)
-        self.decoder2 = Up(features * 4,  features * 2, dropout, residual, attention)
-        self.decoder1 = Up(features * 2,  features,     dropout, residual, attention)
+        # DECODER
+        self.decoder4 = Up(features * 16, features * 8,  dropout, residual, attention, covariance_dropout)
+        self.decoder3 = Up(features * 8,  features * 4,  dropout, residual, attention, covariance_dropout)
+        self.decoder2 = Up(features * 4,  features * 2,  dropout, residual, attention, covariance_dropout)
+        self.decoder1 = Up(features * 2,  features,      dropout, residual, attention, covariance_dropout)
 
         self.output_conv = nn.Conv3d(features, output_channels, kernel_size=1)
 
     def get_all_channel_importances(self) -> list:
-        """
-        Returns list of channel_importance tensors from 4 attention gates.
-        Used by ChannelAwareFocalLoss in the training loop.
-        """
         return [
             self.decoder4.attention_gate.channel_importance,
             self.decoder3.attention_gate.channel_importance,
@@ -199,14 +187,11 @@ class UNet3D(nn.Module):
         enc2 = self.encoder2(enc1)
         enc3 = self.encoder3(enc2)
         enc4 = self.encoder4(enc3)
-
         bottleneck = self.bottleneck(enc4)
-
         dec4 = self.decoder4(bottleneck, enc4)
         dec3 = self.decoder3(dec4, enc3)
         dec2 = self.decoder2(dec3, enc2)
         dec1 = self.decoder1(dec2, enc1)
-
         return self.output_conv(dec1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
